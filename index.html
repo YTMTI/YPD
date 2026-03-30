@@ -3,264 +3,199 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YPD | YouTube to MP3 (GitHub Pages)</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <title>YDP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            background: #0a0a0a;
-            color: #f5f5f5;
-            font-family: 'Inter', sans-serif;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 1rem;
-        }
-        .glass-card {
-            background: rgba(20,20,20,0.7);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 2rem;
-            padding: 2rem;
-            max-width: 32rem;
-            width: 100%;
-            text-align: center;
-            box-shadow: 0 25px 50px -12px black;
-        }
-        h1 { font-size: 2rem; margin-bottom: 0.5rem; }
-        .accent-red { color: #cc0000; }
-        .sub { opacity: 0.6; margin-bottom: 2rem; }
-        input {
-            width: 100%;
-            background: #121212;
-            border: none;
-            border-bottom: 2px solid #333;
-            color: white;
-            padding: 1rem 1.5rem;
-            font-size: 1rem;
-            border-radius: 0.5rem;
-            outline: none;
-            transition: all 0.3s;
-        }
-        input:focus {
-            border-bottom-color: #cc0000;
-            box-shadow: 0 10px 15px -10px rgba(204,0,0,0.3);
-        }
-        button {
-            cursor: pointer;
-            border: none;
-            padding: 1rem 2rem;
-            font-weight: bold;
-            border-radius: 9999px;
-            transition: all 0.3s;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-top: 1.5rem;
-            width: 100%;
-        }
-        .btn-primary {
-            background: #cc0000;
-            color: white;
-            box-shadow: 0 10px 25px rgba(204,0,0,0.3);
-        }
-        .btn-primary:hover {
-            background: #e60000;
-            transform: translateY(-2px);
-        }
-        .btn-secondary {
-            background: linear-gradient(135deg, #8a0000, #cc0000);
-            color: white;
-        }
-        .metadata-card {
-            background: #121212;
-            border: 1px solid #333;
-            padding: 1.5rem;
-            border-radius: 1.5rem;
-            margin: 1.5rem 0;
-        }
-        .thumbnail {
-            width: 100%;
-            aspect-ratio: 16/9;
-            background-size: cover;
-            background-position: center;
-            border-radius: 1rem;
-            margin-bottom: 1rem;
-        }
-        .playlist-icon {
-            aspect-ratio: 16/9;
-            background: linear-gradient(135deg, #1a0000, #330000);
-            border-radius: 1rem;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-        }
-        .playlist-icon svg { width: 3rem; height: 3rem; fill: #cc0000; }
-        .video-title { font-size: 1.25rem; font-weight: 800; text-align: center; }
-        .status { margin-top: 1rem; font-size: 0.875rem; opacity: 0.7; font-style: italic; }
-        .hidden { display: none; }
-        .progress-bar-wrap {
-            background: #333;
-            border-radius: 9999px;
-            height: 6px;
-            margin-top: 1rem;
-            overflow: hidden;
-        }
-        .progress-bar {
-            background: #cc0000;
-            width: 0%;
-            height: 100%;
-            transition: width 0.3s;
-        }
+        body { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); }
+        .glass { background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(12px); }
     </style>
 </head>
-<body>
-<div class="glass-card">
-    <h1>YDP <span class="accent-red">by blood09</span></h1>
-    <div class="sub">YouTube → MP3 (powered by your backend)</div>
+<body class="min-h-screen p-4 flex items-center justify-center">
+    <div class="max-w-2xl w-full glass rounded-2xl p-6 shadow-2xl border border-gray-700">
+        <h1 class="text-3xl font-bold text-white text-center mb-2">🎵 Playlist → MP3 Zip</h1>
+        <p class="text-gray-300 text-center text-sm mb-6">No cookies, no backend – works entirely in your browser</p>
 
-    <div id="input-section">
-        <input type="text" id="url-input" placeholder="Paste YouTube Video or Playlist URL...">
-        <button id="extract-btn" class="btn-primary">Extract Info</button>
-    </div>
-
-    <div id="result-section" class="hidden">
-        <div class="metadata-card">
-            <div id="thumbnail-div" class="thumbnail hidden"></div>
-            <div id="playlist-div" class="playlist-icon hidden">
-                <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h12v2H3v-2zm14 1l5-3-5-3v6z"/></svg>
-                <span id="playlist-count"></span>
+        <div class="space-y-4">
+            <input type="text" id="playlistUrl" class="w-full p-3 rounded-lg bg-slate-800 text-white border border-gray-600 focus:ring-2 focus:ring-blue-500" placeholder="Paste YouTube playlist URL (must contain ?list=...)">
+            
+            <div class="flex gap-3">
+                <button id="downloadBtn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-lg transition">Fetch & Download ZIP</button>
+                <button id="cancelBtn" disabled class="bg-gray-600 text-gray-300 px-4 py-2 rounded-lg cursor-not-allowed">Cancel</button>
             </div>
-            <div id="video-title" class="video-title"></div>
-        </div>
-        <button id="download-btn" class="btn-secondary">Download MP3 / ZIP</button>
-        <div class="progress-bar-wrap hidden" id="progress-wrap">
-            <div class="progress-bar" id="progress-bar"></div>
+
+            <div id="progressArea" class="hidden mt-4">
+                <div class="flex justify-between text-sm text-gray-300">
+                    <span id="statusMsg">Preparing...</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="w-full bg-gray-700 rounded-full h-2 mt-1">
+                    <div id="progressFill" class="bg-green-500 h-2 rounded-full transition-all duration-200" style="width:0%"></div>
+                </div>
+                <div id="log" class="bg-black/30 rounded-lg p-2 h-40 overflow-y-auto text-xs font-mono mt-3 text-gray-300"></div>
+            </div>
         </div>
     </div>
-    <div id="status" class="status">Ready</div>
-</div>
 
-<script>
-    // === CHANGE THIS TO YOUR BACKEND URL ===
-    const BACKEND_URL = 'https://ypd-test.onrender.com'; // e.g. https://ypd-backend.onrender.com
+    <script>
+        // Public Invidious instance (read-only, no cookies)
+        const INVIDIOUS_API = "https://inv.riverside.rocks/api/v1";
+        const COBALT_API = "https://api.cobalt.tools/api/json";
 
-    let currentUrl = '';
-    let isPlaylist = false;
-    let playlistCount = 0;
-    let videoTitle = '';
+        let isCancelled = false;
 
-    const urlInput = document.getElementById('url-input');
-    const extractBtn = document.getElementById('extract-btn');
-    const resultSection = document.getElementById('result-section');
-    const thumbnailDiv = document.getElementById('thumbnail-div');
-    const playlistDiv = document.getElementById('playlist-div');
-    const playlistCountSpan = document.getElementById('playlist-count');
-    const videoTitleSpan = document.getElementById('video-title');
-    const downloadBtn = document.getElementById('download-btn');
-    const statusDiv = document.getElementById('status');
-    const progressWrap = document.getElementById('progress-wrap');
-    const progressBar = document.getElementById('progress-bar');
-
-    extractBtn.addEventListener('click', async () => {
-        const url = urlInput.value.trim();
-        if (!url) return;
-        currentUrl = url;
-        statusDiv.innerText = 'Fetching info...';
-        extractBtn.disabled = true;
-
-        try {
-            const res = await fetch(`${BACKEND_URL}/info`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
-            });
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
-
-            isPlaylist = data.is_playlist;
-            videoTitle = data.title;
-            videoTitleSpan.innerText = videoTitle;
-
-            if (isPlaylist) {
-                playlistCount = data.count;
-                thumbnailDiv.classList.add('hidden');
-                playlistDiv.classList.remove('hidden');
-                playlistCountSpan.innerText = `${playlistCount} track${playlistCount !== 1 ? 's' : ''}`;
-                downloadBtn.innerText = 'Download All as ZIP';
-            } else {
-                playlistDiv.classList.add('hidden');
-                thumbnailDiv.classList.remove('hidden');
-                thumbnailDiv.style.backgroundImage = `url('${data.thumbnail}')`;
-                downloadBtn.innerText = 'Download MP3';
-            }
-
-            resultSection.classList.remove('hidden');
-            document.getElementById('input-section').classList.add('hidden');
-            statusDiv.innerText = isPlaylist ? `Playlist ready: ${playlistCount} tracks.` : 'Ready to convert.';
-        } catch (err) {
-            statusDiv.innerText = `Error: ${err.message}`;
-        } finally {
-            extractBtn.disabled = false;
+        function addLog(msg, isError = false) {
+            const logDiv = document.getElementById('log');
+            const line = document.createElement('div');
+            line.className = `border-l-2 pl-2 mb-1 ${isError ? 'border-red-500 text-red-300' : 'border-green-500 text-gray-300'}`;
+            line.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logDiv.appendChild(line);
+            logDiv.scrollTop = logDiv.scrollHeight;
         }
-    });
 
-    downloadBtn.addEventListener('click', async () => {
-        statusDiv.innerText = isPlaylist ? 'Zipping playlist... may take a while.' : 'Downloading MP3...';
-        downloadBtn.disabled = true;
-        progressWrap.classList.remove('hidden');
-        progressBar.style.width = '0%';
-
-        let fakeProgress = 0;
-        const interval = setInterval(() => {
-            if (fakeProgress < 85) {
-                fakeProgress += Math.random() * 5;
-                progressBar.style.width = Math.min(fakeProgress, 85) + '%';
-            }
-        }, 500);
-
-        try {
-            const res = await fetch(`${BACKEND_URL}/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: currentUrl })
-            });
-
-            clearInterval(interval);
-            progressBar.style.width = '100%';
-
-            if (!res.ok) {
-                const errData = await res.json();
-                throw new Error(errData.error || 'Download failed');
-            }
-
-            const blob = await res.blob();
-            const downloadUrl = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = downloadUrl;
-            a.download = videoTitle + (isPlaylist ? '.zip' : '.mp3');
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            window.URL.revokeObjectURL(downloadUrl);
-            statusDiv.innerText = 'Download complete!';
-        } catch (err) {
-            statusDiv.innerText = `Error: ${err.message}`;
-        } finally {
-            downloadBtn.disabled = false;
-            setTimeout(() => {
-                progressWrap.classList.add('hidden');
-                progressBar.style.width = '0%';
-            }, 2000);
+        function updateProgress(percent, status) {
+            document.getElementById('progressFill').style.width = `${percent}%`;
+            document.getElementById('progressPercent').innerText = `${Math.round(percent)}%`;
+            if (status) document.getElementById('statusMsg').innerText = status;
         }
-    });
-</script>
+
+        function extractPlaylistId(url) {
+            const match = url.match(/[&?]list=([^&]+)/);
+            return match ? match[1] : null;
+        }
+
+        async function fetchPlaylistVideos(playlistId) {
+            let allVideos = [];
+            let continuation = null;
+            do {
+                if (isCancelled) throw new Error("Cancelled");
+                let url = `${INVIDIOUS_API}/playlists/${playlistId}?fields=title,videos,continuation`;
+                if (continuation) url += `&continuation=${continuation}`;
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error(`Invidious error: ${resp.status}`);
+                const data = await resp.json();
+                if (data.videos) {
+                    const videos = data.videos.map(v => ({ id: v.videoId, title: v.title || v.videoId }));
+                    allVideos.push(...videos);
+                    addLog(`Fetched ${videos.length} videos (total ${allVideos.length})`);
+                }
+                continuation = data.continuation || null;
+                if (continuation) await new Promise(r => setTimeout(r, 500));
+            } while (continuation);
+            return { videos: allVideos, playlistTitle: "playlist" };
+        }
+
+        async function convertVideoToMp3(videoId, title) {
+            const payload = {
+                url: `https://www.youtube.com/watch?v=${videoId}`,
+                aFormat: "mp3",
+                isAudioOnly: true,
+                isNoTTL: false,
+                filenamePattern: "classic"
+            };
+            const resp = await fetch(COBALT_API, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (!resp.ok) throw new Error(`Cobalt error ${resp.status}`);
+            const data = await resp.json();
+            if (data.status === "error") throw new Error(data.text);
+            if (!data.url) throw new Error("No download URL");
+            const audioResp = await fetch(data.url);
+            if (!audioResp.ok) throw new Error("Failed to download MP3");
+            const blob = await audioResp.blob();
+            let safeTitle = title.replace(/[^\w\s.-]/g, "").slice(0, 60);
+            if (!safeTitle) safeTitle = videoId;
+            return { blob, filename: `${safeTitle}.mp3` };
+        }
+
+        async function startDownload() {
+            const url = document.getElementById('playlistUrl').value.trim();
+            const playlistId = extractPlaylistId(url);
+            if (!playlistId) {
+                alert("Invalid playlist URL – must contain ?list=...");
+                return;
+            }
+
+            isCancelled = false;
+            document.getElementById('downloadBtn').disabled = true;
+            document.getElementById('cancelBtn').disabled = false;
+            document.getElementById('cancelBtn').classList.remove('cursor-not-allowed', 'bg-gray-600');
+            document.getElementById('cancelBtn').classList.add('bg-red-600', 'hover:bg-red-700', 'cursor-pointer');
+            document.getElementById('progressArea').classList.remove('hidden');
+            document.getElementById('log').innerHTML = '';
+            updateProgress(0, "Fetching playlist...");
+
+            try {
+                addLog(`Playlist ID: ${playlistId}`);
+                const { videos } = await fetchPlaylistVideos(playlistId);
+                if (videos.length === 0) throw new Error("No videos found");
+                addLog(`✅ Found ${videos.length} videos. Starting MP3 conversion...`);
+
+                const zip = new JSZip();
+                let completed = 0;
+                const total = videos.length;
+                const queue = [...videos];
+                const concurrency = 3;
+                const errors = [];
+
+                async function worker() {
+                    while (queue.length > 0 && !isCancelled) {
+                        const video = queue.shift();
+                        if (!video) break;
+                        try {
+                            addLog(`🎧 Converting: ${video.title.substring(0, 50)}...`);
+                            const { blob, filename } = await convertVideoToMp3(video.id, video.title);
+                            zip.file(filename, blob);
+                            completed++;
+                            const percent = (completed / total) * 100;
+                            updateProgress(percent, `Converted ${completed}/${total}`);
+                            addLog(`✅ Added: ${filename}`);
+                        } catch (err) {
+                            errors.push({ title: video.title, error: err.message });
+                            addLog(`❌ Failed: ${video.title.substring(0, 50)} - ${err.message}`, true);
+                            completed++;
+                            const percent = (completed / total) * 100;
+                            updateProgress(percent, `Failed on ${video.title.substring(0, 30)}`);
+                        }
+                    }
+                }
+
+                const workers = [];
+                for (let i = 0; i < concurrency; i++) workers.push(worker());
+                await Promise.all(workers);
+
+                if (isCancelled) throw new Error("Cancelled by user");
+
+                updateProgress(99, "Creating ZIP...");
+                const zipBlob = await zip.generateAsync({ type: "blob" });
+                saveAs(zipBlob, `playlist_${playlistId}.zip`);
+                addLog(`🎉 Success! ZIP saved with ${zip.file(/\.mp3$/).length} MP3 files. ${errors.length} errors.`);
+                updateProgress(100, "Complete!");
+            } catch (err) {
+                if (err.message !== "Cancelled by user") {
+                    addLog(`💥 Fatal error: ${err.message}`, true);
+                    updateProgress(0, "Error");
+                } else {
+                    addLog("⛔ Cancelled.", true);
+                }
+            } finally {
+                document.getElementById('downloadBtn').disabled = false;
+                document.getElementById('cancelBtn').disabled = true;
+                document.getElementById('cancelBtn').classList.remove('bg-red-600', 'hover:bg-red-700', 'cursor-pointer');
+                document.getElementById('cancelBtn').classList.add('bg-gray-600', 'cursor-not-allowed');
+                isCancelled = false;
+            }
+        }
+
+        function cancel() {
+            isCancelled = true;
+        }
+
+        document.getElementById('downloadBtn').onclick = startDownload;
+        document.getElementById('cancelBtn').onclick = cancel;
+    </script>
 </body>
 </html>
