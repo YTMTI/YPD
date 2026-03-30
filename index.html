@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YDP</title>
+    <title>Playlist to MP3 Zip – No Cookies, No Backend</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
@@ -39,11 +39,55 @@
     </div>
 
     <script>
-        // Public Invidious instance (read-only, no cookies)
-        const INVIDIOUS_API = "https://inv.riverside.rocks/api/v1";
+        // List of public Invidious instances that support CORS (or use a CORS proxy)
+        const INVIDIOUS_INSTANCES = [
+            "https://inv.riverside.rocks",
+            "https://yewtu.be",
+            "https://invidious.snopyta.org",
+            "https://vid.puffyan.us"
+        ];
         const COBALT_API = "https://api.cobalt.tools/api/json";
+        // CORS proxy (free, no rate limit for small usage)
+        const CORS_PROXY = "https://corsproxy.io/?";
 
+        let currentInstanceIndex = 0;
         let isCancelled = false;
+
+        async function fetchWithCorsProxy(url) {
+            // Try direct first, then fallback to proxy if CORS error
+            try {
+                const res = await fetch(url);
+                if (res.ok) return res;
+                throw new Error("CORS or network error");
+            } catch (e) {
+                // Use CORS proxy
+                const proxyUrl = CORS_PROXY + encodeURIComponent(url);
+                const res = await fetch(proxyUrl);
+                if (!res.ok) throw new Error(`Proxy fetch failed: ${res.status}`);
+                return res;
+            }
+        }
+
+        async function fetchFromInvidious(path) {
+            for (let i = 0; i < INVIDIOUS_INSTANCES.length; i++) {
+                const instance = INVIDIOUS_INSTANCES[currentInstanceIndex];
+                try {
+                    const url = `${instance}${path}`;
+                    addLog(`Trying Invidious: ${instance}`);
+                    const res = await fetchWithCorsProxy(url);
+                    if (res.ok) {
+                        const data = await res.json();
+                        addLog(`✅ Using ${instance}`);
+                        return data;
+                    }
+                } catch (err) {
+                    addLog(`⚠️ ${instance} failed: ${err.message}`, true);
+                }
+                // rotate to next instance
+                currentInstanceIndex = (currentInstanceIndex + 1) % INVIDIOUS_INSTANCES.length;
+            }
+            throw new Error("All Invidious instances failed");
+        }
 
         function addLog(msg, isError = false) {
             const logDiv = document.getElementById('log');
@@ -70,11 +114,9 @@
             let continuation = null;
             do {
                 if (isCancelled) throw new Error("Cancelled");
-                let url = `${INVIDIOUS_API}/playlists/${playlistId}?fields=title,videos,continuation`;
-                if (continuation) url += `&continuation=${continuation}`;
-                const resp = await fetch(url);
-                if (!resp.ok) throw new Error(`Invidious error: ${resp.status}`);
-                const data = await resp.json();
+                let path = `/api/v1/playlists/${playlistId}?fields=title,videos,continuation`;
+                if (continuation) path += `&continuation=${continuation}`;
+                const data = await fetchFromInvidious(path);
                 if (data.videos) {
                     const videos = data.videos.map(v => ({ id: v.videoId, title: v.title || v.videoId }));
                     allVideos.push(...videos);
