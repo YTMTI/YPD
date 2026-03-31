@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>YPD – YouTube Playlist to MP3 Zip</title>
-    <!-- Use a simple CSS framework (no Tailwind warnings) -->
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -147,7 +146,7 @@
 <div class="card">
     <h1>YPD</h1>
     <div class="badge">YouTube Playlist Downloader</div>
-    <div class="sub">MP3 · ZIP · No API key · No cookies · No backend</div>
+    <div class="sub">MP3 · ZIP · No API key · No cookies · Uses your Vercel proxy</div>
 
     <input type="text" id="playlistUrl" placeholder="Paste YouTube playlist URL (must contain ?list=...)" />
     <button id="downloadBtn">🚀 Fetch & Download ZIP</button>
@@ -158,13 +157,14 @@
         <div id="statusMsg" class="status">Preparing...</div>
         <div id="log" class="log"></div>
     </div>
-    <div class="footer">Uses YouTube RSS feed (via proxy) + Cobalt API (direct). All processing is local.</div>
+    <div class="footer">RSS via proxy | Cobalt via your Vercel proxy → works from GitHub Pages</div>
 </div>
 
 <script>
-    // Only the RSS feed needs a CORS proxy (YouTube doesn't set CORS headers)
+    // ---------- Configuration ----------
     const RSS_PROXY = "https://corsproxy.io/?";
-    const COBALT_API = "https://api.cobalt.tools/api/json";
+    // Your Vercel proxy endpoint (must be deployed with api/cobalt.js)
+    const COBALT_PROXY = "https://project-r315y.vercel.app/api/cobalt";
 
     let isCancelled = false;
 
@@ -223,7 +223,7 @@
         return videos;
     }
 
-    // Convert video using Cobalt API (direct, no proxy – it supports CORS)
+    // Convert video using your Vercel proxy (calls Cobalt API server-side)
     async function convertVideoToMp3(videoId, title) {
         const payload = {
             url: `https://www.youtube.com/watch?v=${videoId}`,
@@ -232,20 +232,19 @@
             isNoTTL: false,
             filenamePattern: "classic"
         };
-        // Direct fetch to Cobalt API (no proxy)
-        const resp = await fetch(COBALT_API, {
+        const resp = await fetch(COBALT_PROXY, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
         });
         if (!resp.ok) {
             const errorText = await resp.text();
-            throw new Error(`Cobalt error ${resp.status}: ${errorText.slice(0, 100)}`);
+            throw new Error(`Proxy error ${resp.status}: ${errorText.slice(0, 100)}`);
         }
         const data = await resp.json();
         if (data.status === "error") throw new Error(data.text);
         if (!data.url) throw new Error("No download URL from Cobalt");
-        // Download the MP3 file (the URL is usually CORS-friendly)
+        // Download the MP3 file (the URL is CORS-friendly)
         const audioResp = await fetch(data.url);
         if (!audioResp.ok) throw new Error("Failed to download MP3");
         const blob = await audioResp.blob();
