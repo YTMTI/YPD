@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YPD – YouTube Playlist to MP3 (RSS method)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>YPD – YouTube Playlist to MP3 Zip</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
@@ -15,12 +15,12 @@
 <body class="min-h-screen flex items-center justify-center p-4">
     <div class="glass rounded-2xl p-6 max-w-md w-full shadow-2xl border border-gray-700">
         <h1 class="text-3xl font-bold text-center bg-gradient-to-r from-orange-500 to-red-500 bg-clip-text text-transparent">YPD</h1>
-        <p class="text-gray-300 text-center text-sm mb-6">YouTube Playlist → MP3 Zip (RSS feed method)</p>
+        <p class="text-gray-300 text-center text-sm mb-6">YouTube Playlist → MP3 Zip (RSS + Cobalt)</p>
 
         <div class="space-y-4">
             <input type="text" id="playlistUrl" class="w-full p-3 rounded-lg bg-slate-800 text-white border border-gray-600 focus:ring-2 focus:ring-orange-500" placeholder="Paste YouTube playlist URL">
-            <button id="downloadBtn" class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 rounded-lg transition">Fetch & Download ZIP</button>
-            <button id="cancelBtn" disabled class="w-full bg-gray-600 text-gray-300 py-2 rounded-lg cursor-not-allowed">Cancel</button>
+            <button id="downloadBtn" class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 rounded-lg transition">🚀 Fetch & Download ZIP</button>
+            <button id="cancelBtn" disabled class="w-full bg-gray-600 text-gray-300 py-2 rounded-lg cursor-not-allowed">⛔ Cancel</button>
         </div>
 
         <div id="progressArea" class="mt-4 hidden">
@@ -30,7 +30,7 @@
             <div id="statusMsg" class="text-gray-400 text-xs text-center mt-2"></div>
             <div id="log" class="bg-black/30 rounded-lg p-2 h-40 overflow-y-auto text-xs font-mono mt-3 text-gray-300"></div>
         </div>
-        <div class="text-gray-500 text-xs text-center mt-4">Uses YouTube RSS feed + Cobalt API. No cookies, no backend.</div>
+        <div class="text-gray-500 text-xs text-center mt-4">Uses YouTube RSS feed (no block) + Cobalt API. No cookies, no backend.</div>
     </div>
 
     <script>
@@ -59,45 +59,43 @@
             return match ? match[1] : null;
         }
 
-        // Fetch playlist info from YouTube RSS feed (no CORS issues with proxy)
+        // Fetch playlist via YouTube RSS feed (never blocked, no auth)
         async function fetchPlaylistFromRSS(playlistId) {
             const rssUrl = `https://www.youtube.com/feeds/videos.xml?playlist_id=${playlistId}`;
             const proxyUrl = CORS_PROXY + encodeURIComponent(rssUrl);
-            addLog("Fetching RSS feed...");
+            addLog("Fetching RSS feed from YouTube...");
             const resp = await fetch(proxyUrl);
             if (!resp.ok) throw new Error(`RSS fetch failed: ${resp.status}`);
             const text = await resp.text();
-            // Parse XML manually (simple regex for video entries)
+            // Parse XML
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(text, "text/xml");
             const entries = xmlDoc.querySelectorAll("entry");
-            if (entries.length === 0) throw new Error("No videos found in RSS feed");
+            if (entries.length === 0) throw new Error("No videos found (playlist may be empty or private)");
             const videos = [];
             for (let entry of entries) {
                 const titleElem = entry.querySelector("title");
-                const videoIdElem = entry.querySelector("yt\\:videoId, videoId");
+                let title = titleElem ? titleElem.textContent : "Unknown";
+                // Extract video ID from <yt:videoId> or <videoId> or link
                 let videoId = null;
+                const videoIdElem = entry.querySelector("yt\\:videoId, videoId");
                 if (videoIdElem) videoId = videoIdElem.textContent;
-                else {
-                    // fallback: extract from link
-                    const link = entry.querySelector("link");
-                    if (link && link.getAttribute("href")) {
-                        const match = link.getAttribute("href").match(/v=([^&]+)/);
+                if (!videoId) {
+                    const link = entry.querySelector("link[rel='alternate']");
+                    if (link) {
+                        const href = link.getAttribute("href");
+                        const match = href.match(/v=([^&]+)/);
                         if (match) videoId = match[1];
                     }
                 }
                 if (videoId) {
-                    videos.push({
-                        id: videoId,
-                        title: titleElem ? titleElem.textContent : `Video ${videoId}`
-                    });
+                    videos.push({ id: videoId, title: title });
                 }
             }
-            addLog(`Found ${videos.length} videos via RSS`);
+            addLog(`✅ RSS feed returned ${videos.length} videos`);
             return videos;
         }
 
-        // Convert a single video to MP3 using Cobalt API (via proxy)
         async function convertVideoToMp3(videoId, title) {
             const payload = {
                 url: `https://www.youtube.com/watch?v=${videoId}`,
@@ -112,11 +110,10 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
             });
-            if (!resp.ok) throw new Error(`Cobalt error ${resp.status}`);
+            if (!resp.ok) throw new Error(`Cobalt HTTP ${resp.status}`);
             const data = await resp.json();
             if (data.status === "error") throw new Error(data.text);
-            if (!data.url) throw new Error("No download URL");
-            // The MP3 URL is usually CORS-friendly
+            if (!data.url) throw new Error("No download URL from Cobalt");
             const audioResp = await fetch(data.url);
             if (!audioResp.ok) throw new Error("Failed to download MP3");
             const blob = await audioResp.blob();
