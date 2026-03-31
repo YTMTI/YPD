@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>YPD – YouTube Playlist to MP3 Zip</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YPD – YouTube Playlist to MP3</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -34,14 +34,6 @@
             color: transparent;
             margin-bottom: 0.25rem;
             text-align: center;
-            letter-spacing: -0.5px;
-        }
-        .badge {
-            text-align: center;
-            font-size: 0.7rem;
-            color: #f97316;
-            margin-bottom: 1rem;
-            font-weight: 500;
         }
         .sub {
             text-align: center;
@@ -58,7 +50,6 @@
             color: #f8fafc;
             font-size: 0.875rem;
             outline: none;
-            transition: all 0.2s;
         }
         input:focus {
             border-color: #f97316;
@@ -73,7 +64,6 @@
             border-radius: 0.75rem;
             color: white;
             font-weight: 700;
-            font-size: 0.875rem;
             cursor: pointer;
             transition: background 0.2s;
         }
@@ -86,9 +76,6 @@
         }
         #cancelBtn {
             background: #475569;
-        }
-        #cancelBtn:hover:not(:disabled) {
-            background: #334155;
         }
         .progress-area {
             margin-top: 1rem;
@@ -119,7 +106,7 @@
             padding: 0.75rem;
             height: 12rem;
             overflow-y: auto;
-            font-family: 'Courier New', monospace;
+            font-family: monospace;
             font-size: 0.7rem;
             color: #cbd5e1;
         }
@@ -145,8 +132,7 @@
 <body>
 <div class="card">
     <h1>YPD</h1>
-    <div class="badge">YouTube Playlist Downloader</div>
-    <div class="sub">MP3 · ZIP · No API key · No cookies · Uses your Vercel proxy</div>
+    <div class="sub">YouTube Playlist → MP3 Zip</div>
 
     <input type="text" id="playlistUrl" placeholder="Paste YouTube playlist URL (must contain ?list=...)" />
     <button id="downloadBtn">🚀 Fetch & Download ZIP</button>
@@ -157,16 +143,14 @@
         <div id="statusMsg" class="status">Preparing...</div>
         <div id="log" class="log"></div>
     </div>
-    <div class="footer">RSS via proxy | Cobalt via your Vercel proxy → works from GitHub Pages</div>
+    <div class="footer">Backend hosted on Render. No API keys, no cookies.</div>
 </div>
 
 <script>
-    // ---------- Configuration ----------
-    const RSS_PROXY = "https://corsproxy.io/?";
-    // Your Vercel proxy endpoint (must be deployed with api/cobalt.js)
-    const COBALT_PROXY = "https://project-r315y.vercel.app/api/cobalt";
+    const BACKEND_URL = "https://ypd-test.onrender.com";
 
     let isCancelled = false;
+    let currentAbort = null;
 
     function addLog(msg, isError = false) {
         const logDiv = document.getElementById('log');
@@ -188,71 +172,6 @@
         return match ? match[1] : null;
     }
 
-    // Fetch playlist via YouTube RSS feed (using proxy for CORS)
-    async function fetchPlaylistFromRSS(playlistId) {
-        const rssUrl = `https://www.youtube.com/feeds/videos.xml?playlist_id=${playlistId}`;
-        const proxyUrl = RSS_PROXY + encodeURIComponent(rssUrl);
-        addLog("Fetching RSS feed from YouTube...");
-        const resp = await fetch(proxyUrl);
-        if (!resp.ok) throw new Error(`RSS fetch failed: ${resp.status}`);
-        const text = await resp.text();
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(text, "text/xml");
-        const entries = xmlDoc.querySelectorAll("entry");
-        if (entries.length === 0) throw new Error("No videos found (playlist may be empty or private)");
-        const videos = [];
-        for (let entry of entries) {
-            const titleElem = entry.querySelector("title");
-            let title = titleElem ? titleElem.textContent : "Unknown";
-            let videoId = null;
-            const videoIdElem = entry.querySelector("yt\\:videoId, videoId");
-            if (videoIdElem) videoId = videoIdElem.textContent;
-            if (!videoId) {
-                const link = entry.querySelector("link[rel='alternate']");
-                if (link) {
-                    const href = link.getAttribute("href");
-                    const match = href.match(/v=([^&]+)/);
-                    if (match) videoId = match[1];
-                }
-            }
-            if (videoId) {
-                videos.push({ id: videoId, title: title });
-            }
-        }
-        addLog(`✅ RSS feed returned ${videos.length} videos`);
-        return videos;
-    }
-
-    // Convert video using your Vercel proxy (calls Cobalt API server-side)
-    async function convertVideoToMp3(videoId, title) {
-        const payload = {
-            url: `https://www.youtube.com/watch?v=${videoId}`,
-            aFormat: "mp3",
-            isAudioOnly: true,
-            isNoTTL: false,
-            filenamePattern: "classic"
-        };
-        const resp = await fetch(COBALT_PROXY, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        });
-        if (!resp.ok) {
-            const errorText = await resp.text();
-            throw new Error(`Proxy error ${resp.status}: ${errorText.slice(0, 100)}`);
-        }
-        const data = await resp.json();
-        if (data.status === "error") throw new Error(data.text);
-        if (!data.url) throw new Error("No download URL from Cobalt");
-        // Download the MP3 file (the URL is CORS-friendly)
-        const audioResp = await fetch(data.url);
-        if (!audioResp.ok) throw new Error("Failed to download MP3");
-        const blob = await audioResp.blob();
-        let safeTitle = title.replace(/[^\w\s.-]/g, "").slice(0, 60);
-        if (!safeTitle) safeTitle = videoId;
-        return { blob, filename: `${safeTitle}.mp3` };
-    }
-
     async function startDownload() {
         const url = document.getElementById('playlistUrl').value.trim();
         const playlistId = extractPlaylistId(url);
@@ -270,70 +189,68 @@
         cancelBtn.classList.add('bg-red-600', 'hover:bg-red-700', 'cursor-pointer');
         document.getElementById('progressArea').style.display = 'block';
         document.getElementById('log').innerHTML = '';
-        updateProgress(0, "Fetching playlist...");
+        updateProgress(0, "Contacting backend...");
+
+        const controller = new AbortController();
+        currentAbort = controller;
 
         try {
+            // 1. Get info
             addLog(`Playlist ID: ${playlistId}`);
-            const videos = await fetchPlaylistFromRSS(playlistId);
-            addLog(`✅ Found ${videos.length} videos. Starting MP3 conversion...`);
+            const infoRes = await fetch(`${BACKEND_URL}/info`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url }),
+                signal: controller.signal
+            });
+            const info = await infoRes.json();
+            if (info.error) throw new Error(info.error);
+            addLog(`Title: ${info.title} | ${info.is_playlist ? `Playlist, ${info.count} videos` : 'Single video'}`);
 
-            const zip = new JSZip();
-            let completed = 0;
-            const total = videos.length;
-            const queue = [...videos];
-            const concurrency = 3;
-            const errors = [];
-
-            async function worker() {
-                while (queue.length > 0 && !isCancelled) {
-                    const video = queue.shift();
-                    if (!video) break;
-                    try {
-                        addLog(`🎧 Converting: ${video.title.substring(0, 50)}...`);
-                        const { blob, filename } = await convertVideoToMp3(video.id, video.title);
-                        zip.file(filename, blob);
-                        completed++;
-                        const percent = (completed / total) * 100;
-                        updateProgress(percent, `Converted ${completed}/${total}`);
-                        addLog(`✅ Added: ${filename}`);
-                    } catch (err) {
-                        errors.push({ title: video.title, error: err.message });
-                        addLog(`❌ Failed: ${video.title.substring(0, 50)} - ${err.message}`, true);
-                        completed++;
-                        const percent = (completed / total) * 100;
-                        updateProgress(percent, `Failed on ${video.title.substring(0, 30)}`);
-                    }
-                }
+            // 2. Trigger download
+            updateProgress(10, "Downloading & converting... (may take a while)");
+            const dlRes = await fetch(`${BACKEND_URL}/download`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url }),
+                signal: controller.signal
+            });
+            if (!dlRes.ok) {
+                const err = await dlRes.json();
+                throw new Error(err.error || 'Download failed');
             }
-
-            const workers = [];
-            for (let i = 0; i < concurrency; i++) workers.push(worker());
-            await Promise.all(workers);
-
-            if (isCancelled) throw new Error("Cancelled by user");
-
-            updateProgress(99, "Creating ZIP...");
-            const zipBlob = await zip.generateAsync({ type: "blob" });
-            saveAs(zipBlob, `YPD_${playlistId}.zip`);
-            addLog(`🎉 Success! ZIP saved with ${zip.file(/\.mp3$/).length} MP3 files. ${errors.length} errors.`);
+            const blob = await dlRes.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = info.is_playlist ? `${info.title}.zip` : `${info.title}.mp3`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(downloadUrl);
             updateProgress(100, "Complete!");
+            addLog("✅ Download finished!");
         } catch (err) {
-            if (err.message !== "Cancelled by user") {
-                addLog(`💥 Fatal error: ${err.message}`, true);
-                updateProgress(0, "Error");
+            if (err.name === 'AbortError') {
+                addLog("⛔ Cancelled by user", true);
             } else {
-                addLog("⛔ Cancelled.", true);
+                addLog(`❌ Error: ${err.message}`, true);
+                updateProgress(0, "Error");
             }
         } finally {
             downloadBtn.disabled = false;
             cancelBtn.disabled = true;
             cancelBtn.classList.remove('bg-red-600', 'hover:bg-red-700', 'cursor-pointer');
             cancelBtn.classList.add('bg-gray-600', 'cursor-not-allowed');
-            isCancelled = false;
+            currentAbort = null;
         }
     }
 
     function cancelProcess() {
+        if (currentAbort) {
+            currentAbort.abort();
+            currentAbort = null;
+        }
         isCancelled = true;
     }
 
