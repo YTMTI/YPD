@@ -157,15 +157,21 @@
     <div id="statusMsg" class="status">Preparing...</div>
     <div id="log" class="log"></div>
   </div>
-  <div class="footer">Uses public Piped API + Cobalt API. All processing is local.</div>
+  <div class="footer">Uses CORS proxy + multiple fallback APIs. All processing is local.</div>
 </div>
 
 <script>
   (function() {
     // ---------- Configuration ----------
-    const PIPED_API = "https://pipedapi.kavin.rocks";
-    const COBALT_API = "https://api.cobalt.tools/api/json";
     const CORS_PROXY = "https://corsproxy.io/?";
+    // List of playlist API endpoints (Piped & Invidious) – all will be proxied
+    const PLAYLIST_APIS = [
+      "https://pipedapi.kavin.rocks/playlists/",
+      "https://inv.riverside.rocks/api/v1/playlists/",
+      "https://yewtu.be/api/v1/playlists/",
+      "https://invidious.snopyta.org/api/v1/playlists/"
+    ];
+    const COBALT_API = "https://api.cobalt.tools/api/json";
 
     let isCancelled = false;
 
@@ -195,32 +201,67 @@
       } catch(e) { return null; }
     }
 
-    async function fetchPlaylistViaPiped(playlistId) {
-      let allVideos = [];
-      let nextpage = null;
-      do {
+    // Fetch playlist data using CORS proxy + multiple endpoints
+    async function fetchPlaylistData(playlistId) {
+      for (let apiBase of PLAYLIST_APIS) {
         if (isCancelled) throw new Error('Cancelled');
-        let url = `${PIPED_API}/playlists/${playlistId}`;
-        if (nextpage) url += `?nextpage=${encodeURIComponent(nextpage)}`;
-        addLog(`Fetching from Piped API...`);
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`Piped API error ${resp.status}`);
-        const data = await resp.json();
-        if (data.videos && data.videos.length) {
-          const videos = data.videos.map(v => ({
-            id: v.url.split('v=')[1]?.split('&')[0] || v.videoId,
-            title: v.title || `video_${v.videoId}`
-          }));
-          allVideos.push(...videos);
-          addLog(`Fetched ${videos.length} videos (total ${allVideos.length})`);
+        try {
+          const apiUrl = apiBase + playlistId;
+          const proxyUrl = CORS_PROXY + encodeURIComponent(apiUrl);
+          addLog(`Trying: ${apiBase}`);
+          const resp = await fetch(proxyUrl);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          
+          // Normalize different API response formats
+          let videos = [];
+          if (data.videos) {
+            // Piped format
+            videos = data.videos.map(v => ({
+              id: v.url?.split('v=')[1]?.split('&')[0] || v.videoId,
+              title: v.title || `video_${v.videoId}`
+            }));
+          } else if (data.videos && Array.isArray(data.videos)) {
+            // Invidious format
+            videos = data.videos.map(v => ({
+              id: v.videoId,
+              title: v.title || `video_${v.videoId}`
+            }));
+          }
+          
+          // Handle pagination (Piped)
+          let allVideos = [...videos];
+          let nextpage = data.nextpage;
+          while (nextpage && !isCancelled) {
+            const nextUrl = apiBase + playlistId + `?nextpage=${encodeURIComponent(nextpage)}`;
+            const nextProxy = CORS_PROXY + encodeURIComponent(nextUrl);
+            const nextResp = await fetch(nextProxy);
+            if (!nextResp.ok) break;
+            const nextData = await nextResp.json();
+            if (nextData.videos) {
+              const nextVideos = nextData.videos.map(v => ({
+                id: v.url?.split('v=')[1]?.split('&')[0] || v.videoId,
+                title: v.title || `video_${v.videoId}`
+              }));
+              allVideos.push(...nextVideos);
+              addLog(`Fetched ${nextVideos.length} more videos (total ${allVideos.length})`);
+            }
+            nextpage = nextData.nextpage || null;
+            if (nextpage) await new Promise(r => setTimeout(r, 300));
+          }
+          
+          if (allVideos.length > 0) {
+            addLog(`✅ Success using ${apiBase} – found ${allVideos.length} videos`);
+            return { videos: allVideos };
+          }
+        } catch (err) {
+          addLog(`⚠️ ${apiBase} failed: ${err.message}`, true);
         }
-        nextpage = data.nextpage || null;
-        if (nextpage) await new Promise(r => setTimeout(r, 300));
-      } while (nextpage && !isCancelled);
-      if (allVideos.length === 0) throw new Error('No videos found in this playlist.');
-      return { videos: allVideos, playlistTitle: 'playlist' };
+      }
+      throw new Error("All playlist APIs failed");
     }
 
+    // Convert video to MP3 using Cobalt API (via CORS proxy)
     async function convertVideoToMp3(videoId, title) {
       const payload = {
         url: `https://www.youtube.com/watch?v=${videoId}`,
@@ -229,25 +270,17 @@
         isNoTTL: false,
         filenamePattern: "classic"
       };
-      let resp;
-      try {
-        resp = await fetch(COBALT_API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-      } catch(e) {
-        const proxyUrl = CORS_PROXY + encodeURIComponent(COBALT_API);
-        resp = await fetch(proxyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-      }
+      const proxyUrl = CORS_PROXY + encodeURIComponent(COBALT_API);
+      const resp = await fetch(proxyUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
       if (!resp.ok) throw new Error(`Cobalt error ${resp.status}`);
       const data = await resp.json();
       if (data.status === "error") throw new Error(data.text);
       if (!data.url) throw new Error("No download URL");
+      // The MP3 URL may be direct – we can fetch it directly (it usually supports CORS)
       const audioResp = await fetch(data.url);
       if (!audioResp.ok) throw new Error("Failed to download MP3");
       const blob = await audioResp.blob();
@@ -276,7 +309,7 @@
 
       try {
         addLog(`Playlist ID: ${playlistId}`);
-        const { videos } = await fetchPlaylistViaPiped(playlistId);
+        const { videos } = await fetchPlaylistData(playlistId);
         addLog(`✅ Found ${videos.length} videos. Starting MP3 conversion...`);
 
         const zip = new JSZip();
