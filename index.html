@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YPD – YouTube Playlist to MP3</title>
+    <title>YPD – YouTube Playlist to MP3 (RSS method)</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <style>
         body { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); }
         .glass { background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(12px); }
@@ -13,11 +15,11 @@
 <body class="min-h-screen flex items-center justify-center p-4">
     <div class="glass rounded-2xl p-6 max-w-md w-full shadow-2xl border border-gray-700">
         <h1 class="text-3xl font-bold text-center bg-gradient-to-r from-orange-500 to-red-500 bg-clip-text text-transparent">YPD</h1>
-        <p class="text-gray-300 text-center text-sm mb-6">YouTube Playlist → MP3 Zip</p>
+        <p class="text-gray-300 text-center text-sm mb-6">YouTube Playlist → MP3 Zip (RSS feed method)</p>
 
         <div class="space-y-4">
             <input type="text" id="playlistUrl" class="w-full p-3 rounded-lg bg-slate-800 text-white border border-gray-600 focus:ring-2 focus:ring-orange-500" placeholder="Paste YouTube playlist URL">
-            <button id="fetchBtn" class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 rounded-lg transition">Fetch & Download ZIP</button>
+            <button id="downloadBtn" class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 rounded-lg transition">Fetch & Download ZIP</button>
             <button id="cancelBtn" disabled class="w-full bg-gray-600 text-gray-300 py-2 rounded-lg cursor-not-allowed">Cancel</button>
         </div>
 
@@ -28,13 +30,14 @@
             <div id="statusMsg" class="text-gray-400 text-xs text-center mt-2"></div>
             <div id="log" class="bg-black/30 rounded-lg p-2 h-40 overflow-y-auto text-xs font-mono mt-3 text-gray-300"></div>
         </div>
+        <div class="text-gray-500 text-xs text-center mt-4">Uses YouTube RSS feed + Cobalt API. No cookies, no backend.</div>
     </div>
 
     <script>
-        // === CHANGE THIS TO YOUR RENDER BACKEND URL ===
-        const BACKEND_URL = "https://ypd-test.onrender.com";
+        const CORS_PROXY = "https://corsproxy.io/?";
+        const COBALT_API = "https://api.cobalt.tools/api/json";
 
-        let currentAbort = null;
+        let isCancelled = false;
 
         function addLog(msg, isError = false) {
             const logDiv = document.getElementById('log');
@@ -43,7 +46,7 @@
             line.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
             logDiv.appendChild(line);
             logDiv.scrollTop = logDiv.scrollHeight;
-            if (logDiv.children.length > 100) logDiv.removeChild(logDiv.firstChild);
+            while (logDiv.children.length > 100) logDiv.removeChild(logDiv.firstChild);
         }
 
         function updateProgress(percent, status) {
@@ -51,84 +54,163 @@
             if (status) document.getElementById('statusMsg').innerText = status;
         }
 
+        function extractPlaylistId(url) {
+            const match = url.match(/[&?]list=([^&]+)/);
+            return match ? match[1] : null;
+        }
+
+        // Fetch playlist info from YouTube RSS feed (no CORS issues with proxy)
+        async function fetchPlaylistFromRSS(playlistId) {
+            const rssUrl = `https://www.youtube.com/feeds/videos.xml?playlist_id=${playlistId}`;
+            const proxyUrl = CORS_PROXY + encodeURIComponent(rssUrl);
+            addLog("Fetching RSS feed...");
+            const resp = await fetch(proxyUrl);
+            if (!resp.ok) throw new Error(`RSS fetch failed: ${resp.status}`);
+            const text = await resp.text();
+            // Parse XML manually (simple regex for video entries)
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(text, "text/xml");
+            const entries = xmlDoc.querySelectorAll("entry");
+            if (entries.length === 0) throw new Error("No videos found in RSS feed");
+            const videos = [];
+            for (let entry of entries) {
+                const titleElem = entry.querySelector("title");
+                const videoIdElem = entry.querySelector("yt\\:videoId, videoId");
+                let videoId = null;
+                if (videoIdElem) videoId = videoIdElem.textContent;
+                else {
+                    // fallback: extract from link
+                    const link = entry.querySelector("link");
+                    if (link && link.getAttribute("href")) {
+                        const match = link.getAttribute("href").match(/v=([^&]+)/);
+                        if (match) videoId = match[1];
+                    }
+                }
+                if (videoId) {
+                    videos.push({
+                        id: videoId,
+                        title: titleElem ? titleElem.textContent : `Video ${videoId}`
+                    });
+                }
+            }
+            addLog(`Found ${videos.length} videos via RSS`);
+            return videos;
+        }
+
+        // Convert a single video to MP3 using Cobalt API (via proxy)
+        async function convertVideoToMp3(videoId, title) {
+            const payload = {
+                url: `https://www.youtube.com/watch?v=${videoId}`,
+                aFormat: "mp3",
+                isAudioOnly: true,
+                isNoTTL: false,
+                filenamePattern: "classic"
+            };
+            const proxyUrl = CORS_PROXY + encodeURIComponent(COBALT_API);
+            const resp = await fetch(proxyUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (!resp.ok) throw new Error(`Cobalt error ${resp.status}`);
+            const data = await resp.json();
+            if (data.status === "error") throw new Error(data.text);
+            if (!data.url) throw new Error("No download URL");
+            // The MP3 URL is usually CORS-friendly
+            const audioResp = await fetch(data.url);
+            if (!audioResp.ok) throw new Error("Failed to download MP3");
+            const blob = await audioResp.blob();
+            let safeTitle = title.replace(/[^\w\s.-]/g, "").slice(0, 60);
+            if (!safeTitle) safeTitle = videoId;
+            return { blob, filename: `${safeTitle}.mp3` };
+        }
+
         async function startDownload() {
             const url = document.getElementById('playlistUrl').value.trim();
-            if (!url) return alert("Please enter a playlist URL");
+            const playlistId = extractPlaylistId(url);
+            if (!playlistId) {
+                alert("Invalid playlist URL – must contain ?list=...");
+                return;
+            }
 
-            const fetchBtn = document.getElementById('fetchBtn');
+            isCancelled = false;
+            const downloadBtn = document.getElementById('downloadBtn');
             const cancelBtn = document.getElementById('cancelBtn');
-            fetchBtn.disabled = true;
+            downloadBtn.disabled = true;
             cancelBtn.disabled = false;
             cancelBtn.classList.remove('cursor-not-allowed', 'bg-gray-600');
             cancelBtn.classList.add('bg-red-600', 'hover:bg-red-700', 'cursor-pointer');
             document.getElementById('progressArea').classList.remove('hidden');
             document.getElementById('log').innerHTML = '';
-            updateProgress(0, "Contacting backend...");
-
-            const controller = new AbortController();
-            currentAbort = controller;
+            updateProgress(0, "Fetching playlist...");
 
             try {
-                // First, get info (optional, but good for feedback)
-                addLog("Fetching playlist info...");
-                const infoRes = await fetch(`${BACKEND_URL}/info`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url }),
-                    signal: controller.signal
-                });
-                const info = await infoRes.json();
-                if (info.error) throw new Error(info.error);
-                addLog(`Title: ${info.title} | ${info.is_playlist ? `Playlist with ${info.count} videos` : "Single video"}`);
+                addLog(`Playlist ID: ${playlistId}`);
+                const videos = await fetchPlaylistFromRSS(playlistId);
+                addLog(`✅ Found ${videos.length} videos. Starting MP3 conversion...`);
 
-                // Now trigger download
-                updateProgress(10, "Downloading and converting... (this may take a while)");
-                const dlRes = await fetch(`${BACKEND_URL}/download`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url }),
-                    signal: controller.signal
-                });
-                if (!dlRes.ok) {
-                    const errData = await dlRes.json();
-                    throw new Error(errData.error || "Download failed");
+                const zip = new JSZip();
+                let completed = 0;
+                const total = videos.length;
+                const queue = [...videos];
+                const concurrency = 3;
+                const errors = [];
+
+                async function worker() {
+                    while (queue.length > 0 && !isCancelled) {
+                        const video = queue.shift();
+                        if (!video) break;
+                        try {
+                            addLog(`🎧 Converting: ${video.title.substring(0, 50)}...`);
+                            const { blob, filename } = await convertVideoToMp3(video.id, video.title);
+                            zip.file(filename, blob);
+                            completed++;
+                            const percent = (completed / total) * 100;
+                            updateProgress(percent, `Converted ${completed}/${total}`);
+                            addLog(`✅ Added: ${filename}`);
+                        } catch (err) {
+                            errors.push({ title: video.title, error: err.message });
+                            addLog(`❌ Failed: ${video.title.substring(0, 50)} - ${err.message}`, true);
+                            completed++;
+                            const percent = (completed / total) * 100;
+                            updateProgress(percent, `Failed on ${video.title.substring(0, 30)}`);
+                        }
+                    }
                 }
-                const blob = await dlRes.blob();
-                const downloadUrl = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = downloadUrl;
-                a.download = info.is_playlist ? `${info.title}.zip` : `${info.title}.mp3`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(downloadUrl);
+
+                const workers = [];
+                for (let i = 0; i < concurrency; i++) workers.push(worker());
+                await Promise.all(workers);
+
+                if (isCancelled) throw new Error("Cancelled by user");
+
+                updateProgress(99, "Creating ZIP...");
+                const zipBlob = await zip.generateAsync({ type: "blob" });
+                saveAs(zipBlob, `YPD_${playlistId}.zip`);
+                addLog(`🎉 Success! ZIP saved with ${zip.file(/\.mp3$/).length} MP3 files. ${errors.length} errors.`);
                 updateProgress(100, "Complete!");
-                addLog("✅ Download finished!");
             } catch (err) {
-                if (err.name === 'AbortError') {
-                    addLog("⛔ Cancelled by user", true);
-                } else {
-                    addLog(`❌ Error: ${err.message}`, true);
+                if (err.message !== "Cancelled by user") {
+                    addLog(`💥 Fatal error: ${err.message}`, true);
                     updateProgress(0, "Error");
+                } else {
+                    addLog("⛔ Cancelled.", true);
                 }
             } finally {
-                fetchBtn.disabled = false;
+                downloadBtn.disabled = false;
                 cancelBtn.disabled = true;
                 cancelBtn.classList.remove('bg-red-600', 'hover:bg-red-700', 'cursor-pointer');
                 cancelBtn.classList.add('bg-gray-600', 'cursor-not-allowed');
-                currentAbort = null;
+                isCancelled = false;
             }
         }
 
-        function cancelDownload() {
-            if (currentAbort) {
-                currentAbort.abort();
-                currentAbort = null;
-            }
+        function cancelProcess() {
+            isCancelled = true;
         }
 
-        document.getElementById('fetchBtn').onclick = startDownload;
-        document.getElementById('cancelBtn').onclick = cancelDownload;
+        document.getElementById('downloadBtn').onclick = startDownload;
+        document.getElementById('cancelBtn').onclick = cancelProcess;
     </script>
 </body>
 </html>
